@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Голосовое меню — 10 дней</title>
+<title>Голосовое меню</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -29,7 +29,6 @@
 <body>
 
 <div class="tap-zone" id="tapZone"></div>
-
 <div class="grid" id="grid"></div>
 
 <div class="dish-card">
@@ -43,9 +42,6 @@
 <div class="status" id="status">1 тап — слушать день. 2 тапа — выбрать день.</div>
 
 <script>
-  // ==========================================
-  // 1. ДАННЫЕ (10 дней)
-  // ==========================================
   const days = [];
   for (let i = 1; i <= 10; i++) {
     days.push({
@@ -65,17 +61,25 @@
   }
 
   let dayIndex = 0, sectionIndex = 0, itemIndex = 0;
-  let isListening = false;
-  let isSpeaking = false;
-  let waitingForVoiceCommand = false; // Ждем ли мы голосового выбора
-
+  let isListening = false, isSpeaking = false, waitingForVoiceCommand = false;
   const synth = window.speechSynthesis;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognition = null;
 
-  // ==========================================
-  // 2. ОЗВУЧКА
-  // ==========================================
+  // Словарь для распознавания чисел словами
+  const numWords = {
+    'перв': 1, 'один': 1, 'одн': 1,
+    'втор': 2, 'два': 2, 'две': 2,
+    'трет': 3, 'три': 3,
+    'четверт': 4, 'четыре': 4,
+    'пят': 5, 'пять': 5,
+    'шест': 6, 'шесть': 6,
+    'седьм': 7, 'семь': 7,
+    'восьм': 8, 'восемь': 8,
+    'девят': 9, 'девять': 9,
+    'десят': 10, 'десять': 10
+  };
+
   function speak(text, onEndCallback) {
     if (!synth) return;
     synth.cancel(); 
@@ -90,9 +94,6 @@
     synth.speak(u);
   }
 
-  // ==========================================
-  // 3. ИНТЕРФЕЙС
-  // ==========================================
   function buildGrid() {
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
@@ -123,18 +124,13 @@
     if (announce) speak(`${d.title}. ${sec.name}. ${item.name}. ${item.price} рублей.`);
   }
 
-  // ==========================================
-  // 4. СЦЕНАРИИ
-  // ==========================================
-  
-  // Перечислить весь день (1 тап)
   function readDay() {
     const d = days[dayIndex];
     let sec = 0, it = 0;
     function next() {
       if (sec >= d.sections.length) {
-        speak('Конец дня. Скажите название блюда для выбора. Для этого тапните по экрану.', () => {
-          waitingForVoiceCommand = true; // Ждем тапа для микрофона
+        speak('Конец дня. Скажите название блюда или номер дня. Для этого тапните по экрану.', () => {
+          waitingForVoiceCommand = true;
         });
         return;
       }
@@ -150,21 +146,18 @@
     next();
   }
 
-  // Спросить день (2 тапа)
   function askDay() {
     speak('Какой день выбрать? Скажите номер от одного до десяти. Тапните по экрану и говорите.', () => {
       waitingForVoiceCommand = true;
     });
   }
 
-  // Спросить следующее блюдо (после выбора)
   function askNextDish() {
     speak('Вы выбрали это блюдо. Назовите следующее, или скажите дальше. Тапните по экрану и говорите.', () => {
       waitingForVoiceCommand = true;
     });
   }
 
-  // Выбор дня
   function selectDay(n) {
     if (n >= 1 && n <= days.length) {
       dayIndex = n - 1; sectionIndex = 0; itemIndex = 0;
@@ -174,7 +167,6 @@
     return false;
   }
 
-  // Выбор блюда (когда сказал название)
   function selectDish(name) {
     const t = name.toLowerCase();
     for (let d = 0; d < days.length; d++) {
@@ -183,9 +175,7 @@
         if (idx !== -1) {
           dayIndex = d; sectionIndex = sec; itemIndex = idx;
           const item = days[d].sections[sec].items[idx];
-          updateDisplay(false); // Обновляем экран молча
-          
-          // Говорим, что выбрали, и просим следующее
+          updateDisplay(false); 
           speak(`Вы выбрали ${item.name}, ${item.price} рублей.`, () => {
             askNextDish();
           });
@@ -196,7 +186,6 @@
     return false;
   }
 
-  // Переход к следующему (если сказали "дальше")
   function nextItem() {
     const d = days[dayIndex];
     const sec = d.sections[sectionIndex];
@@ -206,19 +195,15 @@
     updateDisplay(true);
   }
 
-  // ==========================================
-  // 5. ГОЛОСОВОЕ РАСПОЗНАВАНИЕ
-  // ==========================================
   if (SR) {
     recognition = new SR();
     recognition.lang = 'ru-RU';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
-
     recognition.onstart = () => { isListening = true; };
     recognition.onend = () => { isListening = false; };
     recognition.onerror = () => { isListening = false; waitingForVoiceCommand = false; };
-
+    
     recognition.onresult = (event) => {
       const t = event.results[0][0].transcript.toLowerCase().trim();
       waitingForVoiceCommand = false;
@@ -226,20 +211,30 @@
       if (t.includes('помощь')) { speak('Скажите номер дня или название блюда.'); return; }
       if (t.includes('дальше') || t.includes('следующ')) { nextItem(); return; }
 
-      // Проверка на "День 5" или просто "5"
-      const dayMatch = t.match(/(?:выбери\s+)?день\s*(\d+)/);
-      if (dayMatch) {
-        if (selectDay(parseInt(dayMatch[1]))) return;
-      }
-      const justNum = parseInt(t);
-      if (!isNaN(justNum) && justNum >= 1 && justNum <= 10 && t.length < 5) {
-         if (selectDay(justNum)) return;
+      // 1. Ищем цифру в тексте (например, "5" или "день 5")
+      let foundNum = null;
+      const numMatch = t.match(/\d+/);
+      if (numMatch) {
+        foundNum = parseInt(numMatch[0]);
+      } else {
+        // 2. Если цифры нет, ищем слова (например, "пять" или "пятый")
+        for (const word in numWords) {
+          if (t.includes(word)) {
+            foundNum = numWords[word];
+            break;
+          }
+        }
       }
 
-      // Проверка на блюдо
+      // Если нашли число от 1 до 10, переключаем день
+      if (foundNum && foundNum >= 1 && foundNum <= 10) {
+        if (selectDay(foundNum)) return;
+      }
+
+      // Если не нашли день, ищем блюдо
       if (selectDish(t)) return;
-
-      speak('Не нашла. Тапните и повторите.');
+      
+      speak('Не нашла. Скажите номер дня, например пять. Или название блюда. Тапните и повторите.');
     };
   }
 
@@ -249,45 +244,30 @@
     }
   }
 
-  // ==========================================
-  // 6. ОБРАБОТКА ТАПОВ
-  // ==========================================
   let tapCount = 0;
   let tapTimer = null;
 
   document.getElementById('tapZone').addEventListener('click', () => {
-    // Если робот сейчас говорит, тап просто останавливает его
     if (isSpeaking) {
       synth.cancel();
       isSpeaking = false;
       speak('Остановила. Тапните еще раз.');
       return;
     }
-
-    // Если мы ждем голосовую команду, тап включает микрофон
     if (waitingForVoiceCommand) {
       waitingForVoiceCommand = false;
       startListening();
       return;
     }
-
-    // Иначе считаем тапы
     tapCount++;
     if (tapTimer) clearTimeout(tapTimer);
-
     tapTimer = setTimeout(() => {
-      if (tapCount === 1) {
-        readDay(); // 1 тап — читаем весь день
-      } else if (tapCount >= 2) {
-        askDay();  // 2 тапа — выбираем день
-      }
+      if (tapCount === 1) { readDay(); } 
+      else if (tapCount >= 2) { askDay(); }
       tapCount = 0;
     }, 400);
   });
 
-  // ==========================================
-  // 7. СТАРТ
-  // ==========================================
   buildGrid();
   updateDisplay(true);
 </script>
