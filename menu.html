@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Голосовое меню — 10 дней</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: system-ui, sans-serif;
+    margin: 0; padding: 12px; background: #111; color: #fff;
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center; user-select: none;
+  }
+  .tap-zone { position: fixed; inset: 0; z-index: 9999; cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-width: 500px; margin: 0 auto 14px; pointer-events: none; }
+  .tile { background: #222; border: 2px solid #333; border-radius: 10px; padding: 8px 6px; text-align: center; transition: all 0.2s; min-height: 70px; display: flex; flex-direction: column; justify-content: center; }
+  .tile.active { border-color: #007bff; background: #1a3a5c; transform: scale(1.04); box-shadow: 0 0 14px rgba(0,123,255,0.6); }
+  .tile-title { font-size: 13px; font-weight: bold; }
+  .tile-sub { font-size: 10px; color: #888; margin-top: 3px; }
+  .dish-card { background: #1a1a1a; border: 3px solid #007bff; border-radius: 14px; padding: 18px 14px; max-width: 500px; margin: 0 auto; text-align: center; pointer-events: none; }
+  .dish-day { font-size: 12px; color: #888; }
+  .dish-section { font-size: 14px; color: #4dabf7; margin-top: 4px; }
+  .dish-name { font-size: 26px; font-weight: bold; margin-top: 4px; }
+  .dish-price { font-size: 20px; color: #4dabf7; margin-top: 6px; }
+  .dish-count { font-size: 12px; color: #666; margin-top: 6px; }
+  .status { margin-top: 12px; text-align: center; color: #aaa; font-size: 13px; min-height: 18px; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div class="tap-zone" id="tapZone"></div>
+
+<div class="grid" id="grid"></div>
+
+<div class="dish-card">
+  <div class="dish-day" id="dishDay">День 1 из 10</div>
+  <div class="dish-section" id="dishSection">Завтрак</div>
+  <div class="dish-name" id="dishName">Омлет 1</div>
+  <div class="dish-price" id="dishPrice">250 руб.</div>
+  <div class="dish-count" id="dishCount">Блюдо 1 из 3</div>
+</div>
+
+<div class="status" id="status">1 тап — слушать день. 2 тапа — выбрать день.</div>
+
+<script>
+  // ==========================================
+  // 1. ДАННЫЕ (10 дней)
+  // ==========================================
+  const days = [];
+  for (let i = 1; i <= 10; i++) {
+    days.push({
+      title: `День ${i}`,
+      sections: [
+        { name: "Завтрак", items: [
+          { name: `Омлет ${i}`, price: 250 }, { name: `Каша ${i}`, price: 180 }, { name: `Сырники ${i}`, price: 220 }
+        ]},
+        { name: "Обед", items: [
+          { name: `Борщ ${i}`, price: 300 }, { name: `Котлета ${i}`, price: 350 }, { name: `Плов ${i}`, price: 320 }
+        ]},
+        { name: "Ужин", items: [
+          { name: `Стейк ${i}`, price: 700 }, { name: `Рыба ${i}`, price: 450 }, { name: `Салат ${i}`, price: 200 }
+        ]}
+      ]
+    });
+  }
+
+  let dayIndex = 0, sectionIndex = 0, itemIndex = 0;
+  let isListening = false;
+  let isSpeaking = false;
+  let waitingForVoiceCommand = false; // Ждем ли мы голосового выбора
+
+  const synth = window.speechSynthesis;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+
+  // ==========================================
+  // 2. ОЗВУЧКА
+  // ==========================================
+  function speak(text, onEndCallback) {
+    if (!synth) return;
+    synth.cancel(); 
+    isSpeaking = true;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ru-RU';
+    u.rate = 1.0;
+    u.onend = () => {
+      isSpeaking = false;
+      if (onEndCallback) onEndCallback();
+    };
+    synth.speak(u);
+  }
+
+  // ==========================================
+  // 3. ИНТЕРФЕЙС
+  // ==========================================
+  function buildGrid() {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    days.forEach((d, i) => {
+      const tile = document.createElement('div');
+      tile.className = 'tile' + (i === dayIndex ? ' active' : '');
+      tile.id = 'tile-' + i;
+      tile.innerHTML = `<div class="tile-title">${d.title}</div><div class="tile-sub">З / О / У</div>`;
+      grid.appendChild(tile);
+    });
+  }
+
+  function updateDisplay(announce = true) {
+    document.querySelectorAll('.tile').forEach(t => t.classList.remove('active'));
+    const active = document.getElementById('tile-' + dayIndex);
+    if (active) active.classList.add('active');
+
+    const d = days[dayIndex];
+    const sec = d.sections[sectionIndex];
+    const item = sec.items[itemIndex];
+
+    document.getElementById('dishDay').textContent = `${d.title} из ${days.length}`;
+    document.getElementById('dishSection').textContent = sec.name;
+    document.getElementById('dishName').textContent = item.name;
+    document.getElementById('dishPrice').textContent = item.price + ' руб.';
+    document.getElementById('dishCount').textContent = `Блюдо ${itemIndex + 1} из ${sec.items.length}`;
+
+    if (announce) speak(`${d.title}. ${sec.name}. ${item.name}. ${item.price} рублей.`);
+  }
+
+  // ==========================================
+  // 4. СЦЕНАРИИ
+  // ==========================================
+  
+  // Перечислить весь день (1 тап)
+  function readDay() {
+    const d = days[dayIndex];
+    let sec = 0, it = 0;
+    function next() {
+      if (sec >= d.sections.length) {
+        speak('Конец дня. Скажите название блюда для выбора. Для этого тапните по экрану.', () => {
+          waitingForVoiceCommand = true; // Ждем тапа для микрофона
+        });
+        return;
+      }
+      const s = d.sections[sec];
+      if (it >= s.items.length) { sec++; it = 0; next(); return; }
+      const item = s.items[it];
+      const u = new SpeechSynthesisUtterance(`${s.name}. ${item.name}. ${item.price} рублей.`);
+      u.lang = 'ru-RU';
+      u.onend = () => { it++; next(); };
+      synth.speak(u);
+    }
+    synth.cancel();
+    next();
+  }
+
+  // Спросить день (2 тапа)
+  function askDay() {
+    speak('Какой день выбрать? Скажите номер от одного до десяти. Тапните по экрану и говорите.', () => {
+      waitingForVoiceCommand = true;
+    });
+  }
+
+  // Спросить следующее блюдо (после выбора)
+  function askNextDish() {
+    speak('Вы выбрали это блюдо. Назовите следующее, или скажите дальше. Тапните по экрану и говорите.', () => {
+      waitingForVoiceCommand = true;
+    });
+  }
+
+  // Выбор дня
+  function selectDay(n) {
+    if (n >= 1 && n <= days.length) {
+      dayIndex = n - 1; sectionIndex = 0; itemIndex = 0;
+      updateDisplay(true);
+      return true;
+    }
+    return false;
+  }
+
+  // Выбор блюда (когда сказал название)
+  function selectDish(name) {
+    const t = name.toLowerCase();
+    for (let d = 0; d < days.length; d++) {
+      for (let sec = 0; sec < days[d].sections.length; sec++) {
+        const idx = days[d].sections[sec].items.findIndex(item => t.includes(item.name.toLowerCase()));
+        if (idx !== -1) {
+          dayIndex = d; sectionIndex = sec; itemIndex = idx;
+          const item = days[d].sections[sec].items[idx];
+          updateDisplay(false); // Обновляем экран молча
+          
+          // Говорим, что выбрали, и просим следующее
+          speak(`Вы выбрали ${item.name}, ${item.price} рублей.`, () => {
+            askNextDish();
+          });
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Переход к следующему (если сказали "дальше")
+  function nextItem() {
+    const d = days[dayIndex];
+    const sec = d.sections[sectionIndex];
+    if (itemIndex < sec.items.length - 1) { itemIndex++; }
+    else if (sectionIndex < d.sections.length - 1) { sectionIndex++; itemIndex = 0; }
+    else { dayIndex = (dayIndex + 1) % days.length; sectionIndex = 0; itemIndex = 0; }
+    updateDisplay(true);
+  }
+
+  // ==========================================
+  // 5. ГОЛОСОВОЕ РАСПОЗНАВАНИЕ
+  // ==========================================
+  if (SR) {
+    recognition = new SR();
+    recognition.lang = 'ru-RU';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => { isListening = true; };
+    recognition.onend = () => { isListening = false; };
+    recognition.onerror = () => { isListening = false; waitingForVoiceCommand = false; };
+
+    recognition.onresult = (event) => {
+      const t = event.results[0][0].transcript.toLowerCase().trim();
+      waitingForVoiceCommand = false;
+
+      if (t.includes('помощь')) { speak('Скажите номер дня или название блюда.'); return; }
+      if (t.includes('дальше') || t.includes('следующ')) { nextItem(); return; }
+
+      // Проверка на "День 5" или просто "5"
+      const dayMatch = t.match(/(?:выбери\s+)?день\s*(\d+)/);
+      if (dayMatch) {
+        if (selectDay(parseInt(dayMatch[1]))) return;
+      }
+      const justNum = parseInt(t);
+      if (!isNaN(justNum) && justNum >= 1 && justNum <= 10 && t.length < 5) {
+         if (selectDay(justNum)) return;
+      }
+
+      // Проверка на блюдо
+      if (selectDish(t)) return;
+
+      speak('Не нашла. Тапните и повторите.');
+    };
+  }
+
+  function startListening() {
+    if (recognition && !isListening && !isSpeaking) {
+      try { recognition.start(); } catch(e) {}
+    }
+  }
+
+  // ==========================================
+  // 6. ОБРАБОТКА ТАПОВ
+  // ==========================================
+  let tapCount = 0;
+  let tapTimer = null;
+
+  document.getElementById('tapZone').addEventListener('click', () => {
+    // Если робот сейчас говорит, тап просто останавливает его
+    if (isSpeaking) {
+      synth.cancel();
+      isSpeaking = false;
+      speak('Остановила. Тапните еще раз.');
+      return;
+    }
+
+    // Если мы ждем голосовую команду, тап включает микрофон
+    if (waitingForVoiceCommand) {
+      waitingForVoiceCommand = false;
+      startListening();
+      return;
+    }
+
+    // Иначе считаем тапы
+    tapCount++;
+    if (tapTimer) clearTimeout(tapTimer);
+
+    tapTimer = setTimeout(() => {
+      if (tapCount === 1) {
+        readDay(); // 1 тап — читаем весь день
+      } else if (tapCount >= 2) {
+        askDay();  // 2 тапа — выбираем день
+      }
+      tapCount = 0;
+    }, 400);
+  });
+
+  // ==========================================
+  // 7. СТАРТ
+  // ==========================================
+  buildGrid();
+  updateDisplay(true);
+</script>
+</body>
+</html>
